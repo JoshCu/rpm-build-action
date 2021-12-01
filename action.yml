@@ -1,0 +1,49 @@
+---
+name: Build & Release RPM
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: 'centos:7'
+    env:
+      SERVICE_NAME: !placeholder!
+    steps:
+      - name: Get the tag name
+        run: echo "TAG=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_ENV
+
+      - name: Get the clone and working directory name
+        run: |
+          echo "CLONE_DIR=/__w/${{ github.event.repository.name }}/${{ github.event.repository.name }}" >> $GITHUB_ENV
+          echo "WORKING_DIR=/__w/${{ env.SERVICE_NAME }}-${{ env.TAG }}" >> $GITHUB_ENV
+      - name: checkout
+        uses: actions/checkout@v2
+        
+      - name: move files
+        run: cp -a ${{ env.CLONE_DIR }} ${{ env.WORKING_DIR }}
+        
+      - name: build rpm structure
+        working-directory: ${{ env.WORKING_DIR }}
+        run : |
+          mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          mv ${{ env.SERVICE_NAME }}.spec rpmbuild/SPECS
+          echo -e "\\.[0-9a-zA-Z]*\nrpmbuild" >> rpmbuild/tar_exclusions
+      - name: install dependencies 
+        run: yum install -y rpm-build python3-devel
+
+      - name: build rpm
+        working-directory: /__w/
+        run: |
+          tar -zcf ${{ env.WORKING_DIR }}/rpmbuild/SOURCES/${{ env.SERVICE_NAME }}.tar.gz  --exclude-from=${{ env.WORKING_DIR }}/rpmbuild/tar_exclusions ${{ env.SERVICE_NAME }}-${{ env.TAG }}
+          rpmbuild -ba --define '_release_version ${{ env.TAG }}' --define '_topdir ${{ env.WORKING_DIR }}/rpmbuild' --target noarch ${{ env.WORKING_DIR }}/rpmbuild/SPECS/${{ env.SERVICE_NAME }}.spec
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.WORKING_DIR }}/rpmbuild/RPMS/x86_64/${{ env.SERVICE_NAME }}-${{ env.TAG }}-1.el7.x86_64.rpm
+          tag: ${{ github.ref }}
+          overwrite: true
